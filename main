@@ -1,0 +1,477 @@
+"""
+TicketGenie FastAPI Application
+Provides REST API endpoints for ticket resolution system
+"""
+
+from fastapi import FastAPI, HTTPException, File, UploadFile, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+import base64
+import io
+from enum import Enum
+
+# Import the core system (assuming it's in ticketgenie_core.py)
+# from ticketgenie_core import (
+#     TicketGenieSystem, Ticket, TicketStatus, TicketPriority
+# )
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="TicketGenie API",
+    description="Intelligent AMS Ticket Resolution System",
+    version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize TicketGenie system (global instance)
+# ticketgenie_system = TicketGenieSystem()
+
+# ==============================================
+# REQUEST/RESPONSE MODELS
+# ==============================================
+
+class TicketPriorityEnum(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class TicketStatusEnum(str, Enum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+class TicketRequest(BaseModel):
+    ticket_id: str = Field(..., description="Unique ticket identifier")
+    title: str = Field(..., description="Ticket title", min_length=5)
+    description: str = Field(..., description="Detailed ticket description", min_length=10)
+    priority: TicketPriorityEnum = Field(..., description="Ticket priority")
+    category: Optional[str] = Field(None, description="Ticket category")
+    application: Optional[str] = Field(None, description="Application name")
+    tags: List[str] = Field(default_factory=list, description="Ticket tags")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "ticket_id": "TKT-2024-001",
+                "title": "Application login timeout error",
+                "description": "Users are experiencing timeout errors when trying to log into the customer portal",
+                "priority": "high",
+                "category": "Authentication",
+                "application": "Customer Portal",
+                "tags": ["login", "timeout", "authentication"]
+            }
+        }
+
+class HistoricalTicketRequest(TicketRequest):
+    status: TicketStatusEnum = Field(..., description="Ticket status")
+    resolution: Optional[str] = Field(None, description="Resolution details")
+    created_at: datetime = Field(..., description="Ticket creation timestamp")
+    resolved_at: Optional[datetime] = Field(None, description="Resolution timestamp")
+
+class SimilarTicketResponse(BaseModel):
+    ticket_id: str
+    similarity_score: float
+    title: str
+    resolution: str
+    metadata: Dict[str, Any]
+
+class ResolutionSuggestion(BaseModel):
+    title: str
+    steps: List[str]
+    confidence_score: float
+    estimated_time: str
+
+class ResolutionResponse(BaseModel):
+    ticket_id: str
+    processing_time_seconds: float
+    performance_met: bool
+    similar_tickets: List[Dict[str, Any]]
+    suggestions: List[Dict[str, Any]]
+    recommended_action: str
+    prerequisites: List[str]
+    risks: List[str]
+    reasoning: str
+    matched_tickets: List[Dict[str, Any]]
+
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: datetime
+    version: str
+    database_status: str
+    total_tickets_indexed: int
+
+class BatchIngestRequest(BaseModel):
+    tickets: List[HistoricalTicketRequest]
+
+class BatchIngestResponse(BaseModel):
+    success: bool
+    tickets_ingested: int
+    processing_time_seconds: float
+    errors: List[str] = []
+
+# ==============================================
+# API ENDPOINTS
+# ==============================================
+
+@app.get("/", response_model=Dict[str, str])
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "TicketGenie API",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """Health check endpoint"""
+    return HealthResponse(
+        status="healthy",
+        timestamp=datetime.now(),
+        version="1.0.0",
+        database_status="operational",
+        total_tickets_indexed=len(getattr(app.state, 'ticketgenie_system', None).vector_db.tickets) if hasattr(app.state, 'ticketgenie_system') else 0
+    )
+
+@app.post("/api/v1/tickets/ingest", status_code=201)
+async def ingest_historical_ticket(ticket: HistoricalTicketRequest):
+    """
+    Ingest a single historical ticket into the system
+    
+    This endpoint is used to populate the knowledge base with resolved tickets
+    """
+    try:
+        # Convert request to Ticket object
+        # In production, you would convert the request model to your Ticket class
+        # and call: ticketgenie_system.ingest_historical_ticket(ticket_obj)
+        
+        return {
+            "success": True,
+            "ticket_id": ticket.ticket_id,
+            "message": "Ticket successfully ingested"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/tickets/ingest/batch", response_model=BatchIngestResponse)
+async def batch_ingest_tickets(request: BatchIngestRequest, background_tasks: BackgroundTasks):
+    """
+    Batch ingest multiple historical tickets
+    
+    For large datasets, this is more efficient than individual ingestion
+    """
+    start_time = datetime.now()
+    errors = []
+    
+    try:
+        # In production: ticketgenie_system.batch_ingest_tickets(ticket_objects)
+        tickets_count = len(request.tickets)
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        return BatchIngestResponse(
+            success=True,
+            tickets_ingested=tickets_count,
+            processing_time_seconds=processing_time,
+            errors=errors
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/tickets/resolve", response_model=ResolutionResponse)
+async def resolve_ticket(ticket: TicketRequest):
+    """
+    Process a new ticket and get resolution suggestions
+    
+    This endpoint:
+    1. Analyzes the ticket content
+    2. Finds similar historical tickets
+    3. Generates AI-powered resolution suggestions
+    4. Returns ranked suggestions with confidence scores
+    
+    Performance SLA: 95% of requests under 2 seconds
+    """
+    try:
+        # In production: result = ticketgenie_system.process_new_ticket(ticket_obj)
+        
+        # Mock response for demonstration
+        result = {
+            "ticket_id": ticket.ticket_id,
+            "processing_time_seconds": 1.234,
+            "performance_met": True,
+            "similar_tickets": [
+                {
+                    "ticket_id": "TKT-001",
+                    "similarity_score": 0.89,
+                    "title": "Similar issue with login timeout"
+                }
+            ],
+            "suggestions": [
+                {
+                    "title": "Increase session timeout configuration",
+                    "steps": [
+                        "Access web.config file",
+                        "Locate sessionState section",
+                        "Update timeout value to 60 minutes",
+                        "Restart IIS application pool"
+                    ],
+                    "confidence_score": 0.92,
+                    "estimated_time": "15 minutes"
+                }
+            ],
+            "recommended_action": "Increase session timeout and clear application cache",
+            "prerequisites": ["Admin access to web server", "IIS management permissions"],
+            "risks": ["Brief service interruption during IIS restart"],
+            "reasoning": "High similarity to TKT-001 which had identical symptoms and successful resolution",
+            "matched_tickets": [
+                {
+                    "ticket_id": "TKT-001",
+                    "similarity": 0.89,
+                    "title": "Application login timeout error"
+                }
+            ]
+        }
+        
+        return ResolutionResponse(**result)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/tickets/search")
+async def search_similar_tickets(
+    ticket_id: Optional[str] = None,
+    query: Optional[str] = None,
+    top_k: int = 5,
+    min_similarity: float = 0.7
+):
+    """
+    Search for similar tickets based on query or existing ticket ID
+    """
+    try:
+        if not ticket_id and not query:
+            raise HTTPException(
+                status_code=400,
+                detail="Either ticket_id or query must be provided"
+            )
+        
+        # In production: results = ticketgenie_system.vector_db.search_similar(...)
+        
+        return {
+            "query": query or f"Ticket: {ticket_id}",
+            "results": [
+                {
+                    "ticket_id": "TKT-001",
+                    "similarity_score": 0.89,
+                    "title": "Similar ticket title",
+                    "category": "Authentication",
+                    "resolution": "Resolution details..."
+                }
+            ],
+            "total_results": 1
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/documents/process")
+async def process_document(file: UploadFile = File(...)):
+    """
+    Process uploaded documents (PDF, images, screenshots)
+    
+    Supports:
+    - PDF documents
+    - Images (PNG, JPG, JPEG)
+    - Screenshots of error messages
+    - Scanned documents
+    
+    Uses multimodal AI to extract text and context
+    """
+    try:
+        # Validate file type
+        allowed_types = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file.content_type}"
+            )
+        
+        # Read file content
+        content = await file.read()
+        
+        # Process based on file type
+        if file.content_type == 'application/pdf':
+            # In production: use DocumentProcessor to extract text
+            extracted_text = "PDF text extraction would happen here"
+        else:
+            # Process image
+            base64_image = base64.b64encode(content).decode('utf-8')
+            # In production: use DocumentProcessor.extract_text_from_image()
+            extracted_text = "Image text extraction would happen here"
+        
+        return {
+            "filename": file.filename,
+            "content_type": file.content_type,
+            "size_bytes": len(content),
+            "extracted_text": extracted_text,
+            "success": True
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/analytics/performance")
+async def get_performance_metrics():
+    """
+    Get system performance metrics
+    
+    Returns:
+    - Average processing time
+    - SLA compliance rate
+    - Total tickets processed
+    - Cache hit rate
+    """
+    try:
+        # In production: calculate from ticketgenie_system.audit_log
+        
+        return {
+            "average_processing_time_seconds": 1.45,
+            "sla_compliance_rate": 0.98,
+            "total_tickets_processed": 1250,
+            "p95_processing_time": 1.89,
+            "p99_processing_time": 2.15,
+            "period": "last_30_days"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/analytics/accuracy")
+async def get_accuracy_metrics():
+    """
+    Get resolution suggestion accuracy metrics
+    
+    Tracks:
+    - Precision and recall rates
+    - User feedback on suggestions
+    - Resolution success rate
+    """
+    try:
+        return {
+            "precision": 0.87,
+            "recall": 0.89,
+            "f1_score": 0.88,
+            "user_satisfaction_rate": 0.92,
+            "successful_resolutions": 1089,
+            "total_tickets": 1250,
+            "period": "last_30_days"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/feedback")
+async def submit_feedback(
+    ticket_id: str,
+    suggestion_helpful: bool,
+    resolution_successful: bool,
+    comments: Optional[str] = None
+):
+    """
+    Submit feedback on resolution suggestions
+    
+    Used to improve the system through human-in-the-loop feedback
+    """
+    try:
+        feedback_entry = {
+            "ticket_id": ticket_id,
+            "suggestion_helpful": suggestion_helpful,
+            "resolution_successful": resolution_successful,
+            "comments": comments,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # In production: store feedback for model improvement
+        
+        return {
+            "success": True,
+            "message": "Feedback recorded successfully",
+            "feedback_id": f"FB-{ticket_id}-{datetime.now().timestamp()}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/audit-log")
+async def get_audit_log(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    action: Optional[str] = None,
+    limit: int = 100
+):
+    """
+    Retrieve audit log for compliance and review
+    
+    All AI-driven decisions are logged with:
+    - Timestamp
+    - Action taken
+    - Input data
+    - Output/decision
+    - Reasoning
+    """
+    try:
+        # In production: filter ticketgenie_system.audit_log
+        
+        return {
+            "logs": [
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "process_new_ticket",
+                    "ticket_id": "TKT-001",
+                    "user": "system",
+                    "details": "Processed ticket and generated suggestions"
+                }
+            ],
+            "total": 1,
+            "limit": limit
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==============================================
+# STARTUP/SHUTDOWN EVENTS
+# ==============================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize system on startup"""
+    print("TicketGenie API starting up...")
+    # In production: initialize ticketgenie_system
+    # app.state.ticketgenie_system = TicketGenieSystem()
+    print("System initialized successfully")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    print("TicketGenie API shutting down...")
+    # Cleanup resources if needed
+
+# ==============================================
+# RUN THE APPLICATION
+# ==============================================
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

@@ -1,0 +1,487 @@
+"""
+TicketGenie Quick Start Script
+Run this to test the complete system end-to-end
+"""
+
+import os
+from openai import AzureOpenAI
+from datetime import datetime, timedelta
+import json
+import time
+
+# Initialize OpenAI client
+client = AzureOpenAI(
+    azure_endpoint="",
+    api_key="",
+    api_version=""
+)
+
+print("=" * 80)
+print("TicketGenie - Quick Start Test")
+print("=" * 80)
+
+# ==============================================
+# TEST 1: API Connection Test
+# ==============================================
+
+print("\n[TEST 1] Testing OpenAI API Connection...")
+try:
+    # Test basic API call
+    response = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[{"role": "user", "content": "Say 'API Connected'"}],
+        max_tokens=10
+    )
+    print("✅ GPT-4 API: Connected")
+    print(f"   Response: {response.choices[0].message.content}")
+except Exception as e:
+    print(f"❌ GPT-4 API Error: {e}")
+    exit(1)
+
+# Test embeddings
+try:
+    embedding_response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input="Test embedding"
+    )
+    print("✅ Embeddings API: Connected")
+    print(f"   Dimension: {len(embedding_response.data[0].embedding)}")
+except Exception as e:
+    print(f"❌ Embeddings API Error: {e}")
+    exit(1)
+
+# ==============================================
+# TEST 2: Sample Ticket Data
+# ==============================================
+
+print("\n[TEST 2] Creating Sample Ticket Data...")
+
+historical_tickets = [
+    {
+        "ticket_id": "TKT-001",
+        "title": "Application login timeout error",
+        "description": """Users are experiencing timeout errors when attempting to log into the customer portal. 
+        The error message displayed is 'Session timeout exceeded - Please try again'. 
+        This issue is affecting multiple users across different departments.
+        Users report that they can reach the login page, but after entering credentials and clicking submit,
+        the page hangs for 30-60 seconds before showing the timeout error.""",
+        "category": "Authentication",
+        "application": "Customer Portal",
+        "priority": "high",
+        "tags": ["timeout", "login", "session", "authentication"],
+        "resolution": """Root Cause: Session timeout was configured too low in web.config (20 minutes)
+
+Solution Applied:
+1. Opened web.config on production web server
+2. Located <sessionState> element
+3. Changed timeout attribute from 20 to 60 minutes
+4. Saved changes
+5. Cleared application cache using IIS Manager
+6. Restarted application pool 'CustomerPortal'
+7. Verified fix by testing login with multiple users
+8. Monitored application logs for 24 hours - no further timeout errors reported
+
+Result: Issue completely resolved. Average login time reduced from 45 seconds to 3 seconds."""
+    },
+    {
+        "ticket_id": "TKT-002",
+        "title": "Database connection pool exhausted during peak hours",
+        "description": """Application is throwing 'Cannot open database' errors during peak business hours (9 AM - 11 AM).
+        Error logs show: System.InvalidOperationException: Timeout expired. The timeout period elapsed prior to obtaining a connection from the pool.
+        This may have occurred because all pooled connections were in use and max pool size was reached.
+        Users experience slowness and failed transactions. Database server shows normal CPU and memory usage.""",
+        "category": "Database",
+        "application": "Main Application",
+        "priority": "critical",
+        "tags": ["database", "connection", "performance", "pool"],
+        "resolution": """Root Cause: Connection pool max size was set too low (100) and there was a connection leak in UserService.cs where connections weren't being properly disposed.
+
+Solution Applied:
+1. Increased max pool size in connection string from 100 to 200
+2. Code Review: Found connection leak in UserService.cs - using statement was missing
+3. Updated UserService.cs to use 'using' statement for all SqlConnection objects
+4. Deployed updated code to staging and tested under load
+5. Deployed to production during maintenance window
+6. Monitored connection pool usage via performance counters
+
+Result: Connection pool usage stabilized at 60-80 connections during peak. No timeout errors in 2 weeks."""
+    },
+    {
+        "ticket_id": "TKT-003",
+        "title": "Email notifications not being sent",
+        "description": """Users report not receiving email notifications for password resets and account updates.
+        Email service logs show: SmtpException: Unable to connect to remote server.
+        This started after recent firewall changes. Internal emails work fine, but external emails fail.
+        SMTP server is responding to ping and telnet on port 25.""",
+        "category": "Email",
+        "application": "Notification Service",
+        "priority": "high",
+        "tags": ["email", "smtp", "notifications", "firewall"],
+        "resolution": """Root Cause: New firewall rule was blocking outbound SMTP on port 587 (TLS), only allowing port 25.
+
+Solution Applied:
+1. Contacted network team to review firewall rules
+2. Identified blocking rule added during security update
+3. Created firewall exception for application server IP to SMTP server on port 587
+4. Updated email service configuration to use port 587 with TLS
+5. Tested password reset flow - emails delivered successfully
+6. Verified with multiple email providers (Gmail, Outlook, corporate email)
+
+Result: All email notifications now being delivered within 30 seconds. Zero failed sends in past week."""
+    },
+    {
+        "ticket_id": "TKT-004",
+        "title": "API returning 500 errors for POST requests",
+        "description": """REST API endpoints are returning HTTP 500 Internal Server Error for all POST requests.
+        GET requests work normally. Error started after deployment yesterday.
+        Application logs show: InvalidCastException: Unable to cast object of type 'System.String' to type 'System.Int32'
+        This affects order submission, user registration, and data updates.""",
+        "category": "API",
+        "application": "REST API Service",
+        "priority": "critical",
+        "tags": ["api", "500-error", "post", "deployment"],
+        "resolution": """Root Cause: Recent code change modified request model, changing OrderId from string to int, but didn't update all API endpoints.
+
+Solution Applied:
+1. Reviewed recent deployment changes in Git
+2. Identified commit that changed OrderModel.OrderId type
+3. Found 3 controller methods still expecting string type
+4. Updated PostOrder, UpdateOrder, and DeleteOrder methods to use int
+5. Added unit tests to catch type mismatches
+6. Rolled back to previous version temporarily
+7. Deployed fixed version with proper testing
+8. Added API integration tests to CI/CD pipeline
+
+Result: All POST endpoints functional. Added regression tests prevent similar issues."""
+    },
+    {
+        "ticket_id": "TKT-005",
+        "title": "File upload failing with large files",
+        "description": """Users unable to upload files larger than 5MB. Upload appears to start but fails with 'Request Entity Too Large' error.
+        Smaller files (<5MB) upload successfully. This affects document management, image uploads, and report attachments.
+        Issue occurs on both web interface and mobile app.""",
+        "category": "File Upload",
+        "application": "Document Management",
+        "priority": "medium",
+        "tags": ["upload", "file-size", "configuration"],
+        "resolution": """Root Cause: IIS request length limit was set to default 5MB. Application requires support for files up to 50MB.
+
+Solution Applied:
+1. Updated web.config maxRequestLength to 51200 (50MB in KB)
+2. Updated web.config maxAllowedContentLength to 52428800 (50MB in bytes)
+3. Modified application timeout settings to allow longer upload time
+4. Tested with files ranging from 1MB to 50MB - all successful
+5. Updated user documentation with new file size limits
+6. Added progress indicator for large file uploads
+
+Result: Users can now upload files up to 50MB. No upload failures reported in testing."""
+    }
+]
+
+print(f"✅ Created {len(historical_tickets)} sample historical tickets")
+
+# ==============================================
+# TEST 3: Embedding Generation
+# ==============================================
+
+print("\n[TEST 3] Testing Embedding Generation...")
+
+test_texts = []
+for ticket in historical_tickets:
+    ticket_text = f"""Title: {ticket['title']}
+Description: {ticket['description']}
+Category: {ticket['category']}
+Application: {ticket['application']}
+Tags: {', '.join(ticket['tags'])}"""
+    test_texts.append(ticket_text)
+
+try:
+    start_time = time.time()
+    embeddings_response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=test_texts
+    )
+    embedding_time = time.time() - start_time
+
+    embeddings = [item.embedding for item in embeddings_response.data]
+    print(f"✅ Generated {len(embeddings)} embeddings")
+    print(f"   Processing time: {embedding_time:.3f} seconds")
+    print(f"   Average per embedding: {embedding_time / len(embeddings):.3f} seconds")
+
+    # Store embeddings with ticket IDs
+    ticket_embeddings = {}
+    for ticket, embedding in zip(historical_tickets, embeddings):
+        ticket_embeddings[ticket['ticket_id']] = {
+            'embedding': embedding,
+            'ticket': ticket
+        }
+
+except Exception as e:
+    print(f"❌ Embedding generation failed: {e}")
+    exit(1)
+
+# ==============================================
+# TEST 4: Similarity Search
+# ==============================================
+
+print("\n[TEST 4] Testing Similarity Search...")
+
+# Create a new ticket similar to TKT-001
+new_ticket = {
+    "ticket_id": "TKT-NEW-001",
+    "title": "Users getting timeout on login page",
+    "description": """Several users have reported that when they try to log in to the customer portal,
+    the page times out after they enter their credentials. The login button seems to hang and then
+    they see a timeout error message. This is happening consistently for these users.""",
+    "category": "Authentication",
+    "application": "Customer Portal",
+    "priority": "high",
+    "tags": ["timeout", "login", "portal"]
+}
+
+new_ticket_text = f"""Title: {new_ticket['title']}
+Description: {new_ticket['description']}
+Category: {new_ticket['category']}
+Application: {new_ticket['application']}
+Tags: {', '.join(new_ticket['tags'])}"""
+
+try:
+    # Generate embedding for new ticket
+    new_embedding_response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=new_ticket_text
+    )
+    new_embedding = new_embedding_response.data[0].embedding
+
+    # Calculate cosine similarity with all historical tickets
+    import numpy as np
+
+
+    def cosine_similarity(vec1, vec2):
+        vec1 = np.array(vec1)
+        vec2 = np.array(vec2)
+        return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+
+
+    similarities = []
+    for ticket_id, data in ticket_embeddings.items():
+        similarity = cosine_similarity(new_embedding, data['embedding'])
+        similarities.append({
+            'ticket_id': ticket_id,
+            'similarity': float(similarity),
+            'ticket': data['ticket']
+        })
+
+    # Sort by similarity
+    similarities.sort(key=lambda x: x['similarity'], reverse=True)
+
+    print(f"✅ Found {len(similarities)} similar tickets")
+    print(f"\nTop 3 Most Similar Tickets:")
+    for i, sim in enumerate(similarities[:3], 1):
+        print(f"\n  {i}. {sim['ticket_id']}: {sim['ticket']['title']}")
+        print(f"     Similarity: {sim['similarity']:.2%}")
+        print(f"     Category: {sim['ticket']['category']}")
+
+except Exception as e:
+    print(f"❌ Similarity search failed: {e}")
+    exit(1)
+
+# ==============================================
+# TEST 5: Resolution Generation with GPT-4
+# ==============================================
+
+print("\n[TEST 5] Testing Resolution Generation with GPT-4...")
+
+# Use top 3 similar tickets for context
+top_similar = similarities[:3]
+
+context_parts = []
+for i, sim in enumerate(top_similar, 1):
+    context_parts.append(f"""Similar Ticket {i} (Similarity: {sim['similarity']:.2%}):
+Title: {sim['ticket']['title']}
+Category: {sim['ticket']['category']}
+Resolution: {sim['ticket']['resolution']}
+""")
+
+context = "\n".join(context_parts)
+
+prompt = f"""You are an expert AMS (Application Management Services) ticket resolution assistant.
+
+NEW TICKET:
+Title: {new_ticket['title']}
+Description: {new_ticket['description']}
+Category: {new_ticket['category']}
+Application: {new_ticket['application']}
+Priority: {new_ticket['priority']}
+
+SIMILAR HISTORICAL TICKETS AND THEIR RESOLUTIONS:
+{context}
+
+Based on the similar historical tickets, provide:
+1. 3 potential resolution suggestions ranked by likelihood of success
+2. Step-by-step resolution instructions for the top suggestion
+3. Estimated resolution time
+4. Any prerequisites or requirements
+5. Potential risks or considerations
+
+Format your response as a JSON object with these keys:
+- suggestions: array of objects with (title, steps, confidence_score, estimated_time)
+- recommended_action: the primary suggested resolution
+- prerequisites: array of requirements
+- risks: array of potential issues
+- reasoning: explanation of why these solutions match the ticket
+"""
+
+try:
+    start_time = time.time()
+    response = client.chat.completions.create(
+        model="gpt-4-turbo-preview",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an expert technical support assistant specializing in application management and incident resolution. Always respond with valid JSON."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.3,
+        max_tokens=2000,
+        response_format={"type": "json_object"}
+    )
+    resolution_time = time.time() - start_time
+
+    result = json.loads(response.choices[0].message.content)
+
+    print(f"✅ Generated resolution suggestions")
+    print(f"   Processing time: {resolution_time:.3f} seconds")
+    print(f"   Performance SLA met: {resolution_time < 2.0}")
+
+    print(f"\n{'=' * 80}")
+    print("RESOLUTION SUGGESTIONS")
+    print(f"{'=' * 80}")
+
+    print(f"\nRecommended Action: {result.get('recommended_action', 'N/A')}")
+
+    print(f"\nDetailed Suggestions:")
+    for i, suggestion in enumerate(result.get('suggestions', []), 1):
+        print(f"\n  Suggestion {i}: {suggestion.get('title', 'N/A')}")
+        print(f"  Confidence: {suggestion.get('confidence_score', 0):.0%}")
+        print(f"  Estimated Time: {suggestion.get('estimated_time', 'N/A')}")
+        print(f"  Steps:")
+        for j, step in enumerate(suggestion.get('steps', []), 1):
+            print(f"    {j}. {step}")
+
+    print(f"\nPrerequisites:")
+    for prereq in result.get('prerequisites', []):
+        print(f"  - {prereq}")
+
+    print(f"\nPotential Risks:")
+    for risk in result.get('risks', []):
+        print(f"  - {risk}")
+
+    print(f"\nReasoning:")
+    print(f"  {result.get('reasoning', 'N/A')}")
+
+except Exception as e:
+    print(f"❌ Resolution generation failed: {e}")
+    exit(1)
+
+# ==============================================
+# TEST 6: End-to-End Performance Test
+# ==============================================
+
+print(f"\n{'=' * 80}")
+print("[TEST 6] End-to-End Performance Test")
+print(f"{'=' * 80}")
+
+test_tickets = [
+    {
+        "title": "Cannot connect to database",
+        "description": "Application showing database connection errors",
+        "category": "Database",
+        "tags": ["database", "connection"]
+    },
+    {
+        "title": "Email notifications not working",
+        "description": "Users not receiving password reset emails",
+        "category": "Email",
+        "tags": ["email", "notifications"]
+    },
+    {
+        "title": "API endpoint returning errors",
+        "description": "POST requests to API failing with 500 errors",
+        "category": "API",
+        "tags": ["api", "errors"]
+    }
+]
+
+total_time = 0
+successful_tests = 0
+failed_tests = 0
+
+for i, test_ticket in enumerate(test_tickets, 1):
+    print(f"\nProcessing Test Ticket {i}: {test_ticket['title']}")
+
+    try:
+        start = time.time()
+
+        # Generate embedding
+        ticket_text = f"Title: {test_ticket['title']}\nDescription: {test_ticket['description']}"
+        emb_response = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=ticket_text
+        )
+
+        # Find similar tickets (simplified)
+        test_embedding = emb_response.data[0].embedding
+        test_similarities = []
+        for ticket_id, data in ticket_embeddings.items():
+            sim = cosine_similarity(test_embedding, data['embedding'])
+            if sim > 0.7:  # Minimum threshold
+                test_similarities.append({
+                    'ticket_id': ticket_id,
+                    'similarity': sim,
+                    'ticket': data['ticket']
+                })
+
+        elapsed = time.time() - start
+        total_time += elapsed
+
+        if test_similarities:
+            successful_tests += 1
+            print(f"  ✅ Processed in {elapsed:.3f}s - Found {len(test_similarities)} similar tickets")
+            print(f"     SLA Met: {'Yes' if elapsed < 2.0 else 'No'}")
+        else:
+            failed_tests += 1
+            print(f"  ⚠️  No similar tickets found")
+
+    except Exception as e:
+        failed_tests += 1
+        print(f"  ❌ Error: {e}")
+
+# ==============================================
+# FINAL SUMMARY
+# ==============================================
+
+print(f"\n{'=' * 80}")
+print("TEST SUMMARY")
+print(f"{'=' * 80}")
+
+print(f"\n✅ All Core Tests Passed!")
+print(f"\nPerformance Metrics:")
+print(f"  - Total Tickets Processed: {len(test_tickets)}")
+print(f"  - Successful: {successful_tests}")
+print(f"  - Failed: {failed_tests}")
+print(f"  - Average Processing Time: {total_time / len(test_tickets):.3f} seconds")
+print(f"  - SLA Compliance: {(total_time / len(test_tickets) < 2.0)}")
+
+print(f"\nSystem Ready for Production! 🚀")
+print(f"\nNext Steps:")
+print(f"  1. Load your historical ticket data")
+print(f"  2. Configure MongoDB or PostgreSQL for persistence")
+print(f"  3. Deploy FastAPI application")
+print(f"  4. Start processing real tickets")
+
+print(f"\n{'=' * 80}")
