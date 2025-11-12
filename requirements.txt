@@ -111,6 +111,7 @@ uvloop==0.22.1
 watchdog==6.0.0
 watchfiles==1.1.1
 websockets==15.0.1
+xlrd==2.0.2
 xxhash==3.6.0
 yarl==1.22.0
 zstandard==0.25.0

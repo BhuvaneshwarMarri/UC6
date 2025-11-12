@@ -1,5 +1,5 @@
 ### Importing Libraries
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredImageLoader, TextLoader
+from langchain_community.document_loaders import UnstructuredExcelLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -34,17 +34,8 @@ class State(TypedDict):
 ### Defining Nodes
 def load_file(state: State) -> State:
     try:
-        file_type = state['file_type']
-
-        if file_type in ['png', 'jpeg', 'jpg']:
-            loader = UnstructuredImageLoader(state['file_path'])
-        elif file_type == 'pdf': 
-            loader = PyPDFLoader(state['file_path'])
-        elif file_type == 'txt':
-            loader = TextLoader(state['file_path'])
-
+        loader = UnstructuredExcelLoader(state['file_path'], mode='elements')
         print(f"File Content: {loader.load()}")
-
         return {'file_content': loader.load()}
 
     except Exception as e:
@@ -58,10 +49,11 @@ def split_content(state: State) -> State:
             separators=['\n', '\n\n', ',', '.', ' ']
         )
 
-        if state['file_type'] == 'txt':
-            return {'file_splits': text_splitter.split_text(state['file_content'])}
+        file_splits = text_splitter.split_documents(state['file_content'])
+
+        print(f"File Splits: {file_splits}")
         
-        return {'file_splits': text_splitter.split_documents(state['file_content'])}
+        return {'file_splits': file_splits}
 
     except Exception as e:
         print(f"Error in split_content: {e}")

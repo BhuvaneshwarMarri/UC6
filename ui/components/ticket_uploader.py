@@ -7,8 +7,8 @@ def tickets_uploader_component():
     st.subheader("📤 Upload Previous Tickets")
 
     uploaded_files = st.file_uploader(
-        "Upload ticket files (JSON, PDF, or TXT)", 
-        type=["json", "pdf", "txt"], 
+        "Upload Previous Tickets (Excel)", 
+        type=["xlsx", "xls"], 
         accept_multiple_files=True
     )
 
