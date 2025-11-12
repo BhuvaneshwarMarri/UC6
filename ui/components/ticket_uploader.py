@@ -25,7 +25,7 @@ def tickets_uploader_component():
             with st.spinner("Ingesting tickets..."):
                 response = requests.post(
                     "http://localhost:8000/tickets", 
-                    json={"tickets": files_data}
+                    files={"ticket": (file.name, file.getvalue(), file.type)}
                 )
             if response.status_code == 200:
                 st.success("✅ Tickets ingested successfully!")
